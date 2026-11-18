@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ff4d28'><path d='M19 14V10H14V5H10V10H5V14H10V19H14V14H19Z'/></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MEDICOS - AI Medical Assistant</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                orange: '#ff4d28',
+                hover: '#f23a10',
+                dark: '#0c0c0e',
+                surface: '#151518',
+                card: '#1a1a1f',
+                border: '#27272e',
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        background-color: #08080a;
+        color: #f3f4f6;
+      }
+      /* Custom glowing ambient gradients matching reference images */
+      .ambient-glow {
+        background: radial-gradient(circle 600px at 50% 180px, rgba(255, 77, 40, 0.18), transparent 70%);
+      }
+      .card-glow {
+        box-shadow: 0 0 35px -5px rgba(255, 77, 40, 0.12);
+      }
+      /* Custom thin scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #0f0f13;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #2a2a35;
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #ff4d28;
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-[#08080a] text-zinc-100 antialiased selection:bg-[#ff4d28] selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
