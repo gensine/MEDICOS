@@ -1,9 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, BookOpen, AlertCircle, Sparkles, Loader2, RefreshCw } from 'lucide-react';
+import { Send, Bot, User, BookOpen, AlertCircle, Sparkles, Loader2, RefreshCw, Mic, MicOff } from 'lucide-react';
 import MarkdownRenderer from './MarkdownRenderer';
 
 export default function ChatInterface({ inputQuery, setInputQuery, onSendMessage, messages, loading }) {
   const [showSources, setShowSources] = useState({});
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(true);
+  const recognitionRef = useRef(null);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -13,6 +16,68 @@ export default function ChatInterface({ inputQuery, setInputQuery, onSendMessage
   useEffect(() => {
     scrollToBottom();
   }, [messages, loading]);
+
+  // Voice to text (Web Speech API) setup
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onresult = (event) => {
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript) {
+          setInputQuery(transcript);
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.warn('Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+    } else {
+      setSpeechSupported(false);
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+    };
+  }, [setInputQuery]);
+
+  const toggleListening = () => {
+    if (!speechSupported) {
+      alert('Voice-to-Text is not supported by your current browser. Please try Chrome, Edge, or Safari.');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+    } else {
+      try {
+        recognitionRef.current?.start();
+      } catch (err) {
+        console.warn('Speech recognition start failed:', err);
+      }
+    }
+  };
 
   const toggleSources = (index) => {
     setShowSources(prev => ({ ...prev, [index]: !prev[index] }));
@@ -123,23 +188,48 @@ export default function ChatInterface({ inputQuery, setInputQuery, onSendMessage
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Box */}
-      <form onSubmit={handleSubmit} className="p-3.5 bg-zinc-950/80 border-t border-zinc-800/80 flex items-center gap-2">
-        <input
-          type="text"
-          value={inputQuery}
-          onChange={(e) => setInputQuery(e.target.value)}
-          placeholder="Ask a medical question (e.g. causes of asthma, diabetes complications)..."
-          className="flex-1 bg-zinc-900/90 border border-zinc-800 text-zinc-100 text-xs sm:text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-[#ff4d28]/70 focus:ring-1 focus:ring-[#ff4d28]/70 transition-all placeholder:text-zinc-500"
-        />
-        <button
-          type="submit"
-          disabled={loading || !inputQuery.trim()}
-          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#ff4d28] to-[#e03a16] text-white font-medium text-xs sm:text-sm shadow-md shadow-[#ff4d28]/25 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
-        >
-          <span>Ask</span>
-          <Send className="w-3.5 h-3.5" />
-        </button>
+      {/* Input Box with Voice-to-Text */}
+      <form onSubmit={handleSubmit} className="p-3.5 bg-zinc-950/80 border-t border-zinc-800/80 flex flex-col gap-2 relative">
+        {isListening && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#ff4d28]/10 border border-[#ff4d28]/30 w-fit text-xs text-[#ff4d28] animate-pulse">
+            <span className="w-2 h-2 rounded-full bg-[#ff4d28] shadow-[0_0_8px_#ff4d28]" />
+            <span className="font-medium text-[11px]">Listening to your voice... Speak your question now</span>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={inputQuery}
+            onChange={(e) => setInputQuery(e.target.value)}
+            placeholder={isListening ? "Listening... speak now..." : "Ask a medical question (or click the microphone to speak)..."}
+            className="flex-1 bg-zinc-900/90 border border-zinc-800 text-zinc-100 text-xs sm:text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-[#ff4d28]/70 focus:ring-1 focus:ring-[#ff4d28]/70 transition-all placeholder:text-zinc-500"
+          />
+
+          {/* Voice to text Mic Button */}
+          <button
+            type="button"
+            onClick={toggleListening}
+            title={isListening ? "Listening... Click to stop" : "Voice-to-Text: Click to speak your question"}
+            className={`p-2.5 rounded-xl border transition-all flex items-center justify-center shrink-0 ${
+              isListening
+                ? 'bg-[#ff4d28] text-white border-[#ff4d28] shadow-[0_0_15px_rgba(255,77,40,0.6)] animate-pulse'
+                : 'bg-zinc-900/90 text-zinc-400 hover:text-white border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800'
+            }`}
+          >
+            {isListening ? <MicOff className="w-4 h-4 text-white" /> : <Mic className="w-4 h-4" />}
+          </button>
+
+          {/* Ask Button */}
+          <button
+            type="submit"
+            disabled={loading || !inputQuery.trim()}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#ff4d28] to-[#e03a16] text-white font-medium text-xs sm:text-sm shadow-md shadow-[#ff4d28]/25 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5 shrink-0"
+          >
+            <span>Ask</span>
+            <Send className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </form>
     </div>
   );
