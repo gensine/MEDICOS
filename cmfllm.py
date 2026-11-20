@@ -1,4 +1,7 @@
 import os
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -26,8 +29,10 @@ def create_chunks(documents, chunk_size=500, chunk_overlap=50):
 
 def get_embedding_model(model_name="sentence-transformers/all-MiniLM-L6-v2"):
     print(f"Loading embedding model: {model_name}...")
+    snapshot = os.path.expanduser('~/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41')
+    target_model = snapshot if os.path.exists(snapshot) else model_name
     embeddings = HuggingFaceEmbeddings(
-        model_name=model_name,
+        model_name=target_model,
         model_kwargs={'device': 'cpu'}
     )
     return embeddings

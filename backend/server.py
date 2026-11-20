@@ -1,4 +1,7 @@
 import os
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
 import requests
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +12,7 @@ from typing import Optional, List
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_FAISS_PATH = os.path.join(BASE_DIR, "vectorstore", "db_faiss")
 DATA_PATH = os.path.join(BASE_DIR, "data")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 
 app = FastAPI(title="Medicos API", description="Medical AI Chatbot with LangChain, FAISS & Ollama")
 
@@ -30,8 +33,10 @@ def get_embeddings():
     global embeddings
     if embeddings is None:
         from langchain_huggingface import HuggingFaceEmbeddings
+        snapshot = os.path.expanduser('~/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2/snapshots/1110a243fdf4706b3f48f1d95db1a4f5529b4d41')
+        model_target = snapshot if os.path.exists(snapshot) else "sentence-transformers/all-MiniLM-L6-v2"
         embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_name=model_target,
             model_kwargs={'device': 'cpu'}
         )
     return embeddings
@@ -144,13 +149,13 @@ Answer:"""
                 "prompt": prompt,
                 "stream": False
             },
-            timeout=60
+            timeout=(2.0, 60.0)
         )
         if ollama_resp.status_code == 200:
             answer = ollama_resp.json().get("response", "").strip()
         else:
             answer = f"Ollama returned status code {ollama_resp.status_code}. Make sure model '{model_name}' is pulled."
-    except requests.exceptions.ConnectionError:
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
         # Graceful fallback explaining that Ollama is offline but showing retrieved RAG excerpts
         if rag_active:
             answer = (
