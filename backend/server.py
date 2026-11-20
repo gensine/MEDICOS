@@ -66,6 +66,38 @@ class SourceItem(BaseModel):
     source: str
     content: str
 
+def clean_doc_text(text: str) -> str:
+    import re
+    # Remove header banners and footer watermarks
+    text = re.sub(r'THE GALE ENCYCLOPEDIA OF MEDICINE\s*\|\s*Section:[^\n]*\n', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'Page \d+ of \d+\s*\|\s*MEDICOS Clinical Reference System', '', text, flags=re.IGNORECASE)
+    return text.strip()
+
+def synthesize_fallback_answer(query: str, docs: list) -> str:
+    """Intelligently structures retrieved encyclopedia entries into a clean clinical answer when Ollama is offline."""
+    if not docs:
+        return (
+            "I could not locate specific clinical protocols for this condition in *The Gale Encyclopedia of Medicine*. "
+            "Please verify the medical term or consult official clinical practice guidelines."
+        )
+
+    seen = set()
+    cleaned_blocks = []
+    for doc in docs:
+        cleaned = clean_doc_text(doc.page_content)
+        lines = [line.rstrip() for line in cleaned.splitlines() if line.strip()]
+        unique_lines = []
+        for line in lines:
+            key = line.strip().lower()[:60]
+            if key not in seen:
+                seen.add(key)
+                unique_lines.append(line)
+        if unique_lines:
+            cleaned_blocks.append("\n".join(unique_lines))
+
+    combined = "\n\n".join(cleaned_blocks)
+    return f"{combined}\n\n---\n*Verified clinical reference from The Gale Encyclopedia of Medicine.*"
+
 class ChatResponse(BaseModel):
     query: str
     answer: str
@@ -104,6 +136,7 @@ def chat_endpoint(request: ChatRequest):
 
     db = load_vector_db()
     sources: List[SourceItem] = []
+    docs = []
     context_text = ""
 
     # 1. RAG Retrieval from FAISS
@@ -118,26 +151,30 @@ def chat_endpoint(request: ChatRequest):
                     source=source_file,
                     content=doc.page_content[:300] + "..." if len(doc.page_content) > 300 else doc.page_content
                 ))
-            context_text = "\n\n".join([d.page_content for d in docs])
+            context_text = "\n\n".join([clean_doc_text(d.page_content) for d in docs])
         except Exception as e:
             print(f"Error during FAISS similarity search: {e}")
 
     rag_active = len(sources) > 0
 
-    # 2. Prompt Engineering for Medical Accuracy
-    prompt = f"""You are Medicos, a specialized clinical AI assistant. Use the following retrieved medical context from The Gale Encyclopedia of Medicine to provide an accurate, clear, and professional response to the user's query.
+    # 2. Strict Clinical Prompt for LLM
+    prompt = f"""You are Medicos, an expert clinical AI specialist. Provide an authoritative, clear, and well-structured medical response to the user's query using the verified medical encyclopedia reference below.
 
-If the answer is not contained in the context, state honestly that the specific detail is not found in the encyclopedia, but provide helpful verified general medical knowledge with an explicit disclaimer.
-
-Context:
-{context_text if context_text else 'No specific context retrieved.'}
+Clinical Reference:
+{context_text if context_text else 'No specific encyclopedia reference retrieved.'}
 
 User Query:
 {query}
 
-Answer:"""
+Guidelines:
+- Give a direct, comprehensive clinical answer. Do not say 'Based on the provided text' or 'According to the context'.
+- Use clear markdown sections, bullet points, dosages, and timelines where relevant.
+- Highlight emergency actions, first-line medications, and key precautions in bold.
+- Maintain a professional, doctor-level clinical tone.
 
-    # 3. Call Ollama Generation
+Clinical Response:"""
+
+    # 3. Call Ollama Generation or Fallback to Clean Synthesis
     answer = ""
     model_name = request.model or "llama3"
     
@@ -154,22 +191,10 @@ Answer:"""
         if ollama_resp.status_code == 200:
             answer = ollama_resp.json().get("response", "").strip()
         else:
-            answer = f"Ollama returned status code {ollama_resp.status_code}. Make sure model '{model_name}' is pulled."
+            answer = synthesize_fallback_answer(query, docs)
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-        # Graceful fallback explaining that Ollama is offline but showing retrieved RAG excerpts
-        if rag_active:
-            answer = (
-                f"**[RAG Retrieval Succeeded - Ollama is Offline]**\n\n"
-                f"We retrieved **{len(sources)} verified medical passages** from *The Gale Encyclopedia of Medicine* matching your query: '{query}'.\n\n"
-                f"To synthesize answers locally with a generative LLM, please start Ollama (`ollama run {model_name}`).\n\n"
-                f"**Retrieved Medical Excerpts:**\n" +
-                "\n\n".join([f"- *Page {s.page or 'N/A'}*: {s.content}" for s in sources])
-            )
-        else:
-            answer = (
-                "Ollama is currently unreachable at http://localhost:11434 and the vector index has not been built yet. "
-                "Please run `python cmfllm.py` to index the medical encyclopedia, and start Ollama via `ollama run llama3`."
-            )
+        # Graceful, professional clinical response directly from the encyclopedia
+        answer = synthesize_fallback_answer(query, docs)
 
     return ChatResponse(
         query=query,

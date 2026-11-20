@@ -17,14 +17,15 @@ def load_pdf_files(data_path):
     print(f"Loaded {len(documents)} pages from PDF(s).")
     return documents
 
-def create_chunks(documents, chunk_size=500, chunk_overlap=50):
-    print("Splitting documents into text chunks...")
+def create_chunks(documents, chunk_size=1500, chunk_overlap=150):
+    print("Splitting documents into cohesive clinical chunks...")
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", " ", ""]
     )
     text_chunks = text_splitter.split_documents(documents)
-    print(f"Created {len(text_chunks)} text chunks.")
+    print(f"Created {len(text_chunks)} cohesive text chunks.")
     return text_chunks
 
 def get_embedding_model(model_name="sentence-transformers/all-MiniLM-L6-v2"):
