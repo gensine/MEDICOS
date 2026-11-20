@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, BookOpen, AlertCircle, Sparkles, Loader2, RefreshCw } from 'lucide-react';
+import MarkdownRenderer from './MarkdownRenderer';
 
 export default function ChatInterface({ inputQuery, setInputQuery, onSendMessage, messages, loading }) {
   const [showSources, setShowSources] = useState({});
@@ -67,7 +68,11 @@ export default function ChatInterface({ inputQuery, setInputQuery, onSendMessage
                       : 'bg-zinc-900/90 text-zinc-200 border border-zinc-800/80 rounded-tl-sm shadow-sm'
                   }`}
                 >
-                  <p className="whitespace-pre-line">{msg.content}</p>
+                  {isUser ? (
+                    <p className="whitespace-pre-line">{msg.content}</p>
+                  ) : (
+                    <MarkdownRenderer content={msg.content} />
+                  )}
                 </div>
 
                 {/* Source Citations Drawer for AI responses */}

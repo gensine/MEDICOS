@@ -57,6 +57,12 @@ def load_vector_db():
             print("FAISS vector store not yet found on disk.")
     return vector_db
 
+@app.on_event("startup")
+def startup_event():
+    print("Preloading vector database on server startup...")
+    load_vector_db()
+    print("Vector database is warm and ready.")
+
 class ChatRequest(BaseModel):
     query: str
     model: Optional[str] = "llama3"
@@ -65,38 +71,6 @@ class SourceItem(BaseModel):
     page: Optional[int] = None
     source: str
     content: str
-
-def clean_doc_text(text: str) -> str:
-    import re
-    # Remove header banners and footer watermarks
-    text = re.sub(r'THE GALE ENCYCLOPEDIA OF MEDICINE\s*\|\s*Section:[^\n]*\n', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'Page \d+ of \d+\s*\|\s*MEDICOS Clinical Reference System', '', text, flags=re.IGNORECASE)
-    return text.strip()
-
-def synthesize_fallback_answer(query: str, docs: list) -> str:
-    """Intelligently structures retrieved encyclopedia entries into a clean clinical answer when Ollama is offline."""
-    if not docs:
-        return (
-            "I could not locate specific clinical protocols for this condition in *The Gale Encyclopedia of Medicine*. "
-            "Please verify the medical term or consult official clinical practice guidelines."
-        )
-
-    seen = set()
-    cleaned_blocks = []
-    for doc in docs:
-        cleaned = clean_doc_text(doc.page_content)
-        lines = [line.rstrip() for line in cleaned.splitlines() if line.strip()]
-        unique_lines = []
-        for line in lines:
-            key = line.strip().lower()[:60]
-            if key not in seen:
-                seen.add(key)
-                unique_lines.append(line)
-        if unique_lines:
-            cleaned_blocks.append("\n".join(unique_lines))
-
-    combined = "\n\n".join(cleaned_blocks)
-    return f"{combined}\n\n---\n*Verified clinical reference from The Gale Encyclopedia of Medicine.*"
 
 class ChatResponse(BaseModel):
     query: str
@@ -136,7 +110,6 @@ def chat_endpoint(request: ChatRequest):
 
     db = load_vector_db()
     sources: List[SourceItem] = []
-    docs = []
     context_text = ""
 
     # 1. RAG Retrieval from FAISS
@@ -151,30 +124,26 @@ def chat_endpoint(request: ChatRequest):
                     source=source_file,
                     content=doc.page_content[:300] + "..." if len(doc.page_content) > 300 else doc.page_content
                 ))
-            context_text = "\n\n".join([clean_doc_text(d.page_content) for d in docs])
+            context_text = "\n\n".join([d.page_content for d in docs])
         except Exception as e:
             print(f"Error during FAISS similarity search: {e}")
 
     rag_active = len(sources) > 0
 
-    # 2. Strict Clinical Prompt for LLM
-    prompt = f"""You are Medicos, an expert clinical AI specialist. Provide an authoritative, clear, and well-structured medical response to the user's query using the verified medical encyclopedia reference below.
+    # 2. Prompt Engineering for Medical Accuracy
+    prompt = f"""You are Medicos, a specialized clinical AI assistant. Use the following retrieved medical context from The Gale Encyclopedia of Medicine to provide an accurate, clear, and professional response to the user's query.
 
-Clinical Reference:
-{context_text if context_text else 'No specific encyclopedia reference retrieved.'}
+If the answer is not contained in the context, state honestly that the specific detail is not found in the encyclopedia, but provide helpful verified general medical knowledge with an explicit disclaimer.
+
+Context:
+{context_text if context_text else 'No specific context retrieved.'}
 
 User Query:
 {query}
 
-Guidelines:
-- Give a direct, comprehensive clinical answer. Do not say 'Based on the provided text' or 'According to the context'.
-- Use clear markdown sections, bullet points, dosages, and timelines where relevant.
-- Highlight emergency actions, first-line medications, and key precautions in bold.
-- Maintain a professional, doctor-level clinical tone.
+Answer:"""
 
-Clinical Response:"""
-
-    # 3. Call Ollama Generation or Fallback to Clean Synthesis
+    # 3. Call Ollama Generation
     answer = ""
     model_name = request.model or "llama3"
     
@@ -184,17 +153,32 @@ Clinical Response:"""
             json={
                 "model": model_name,
                 "prompt": prompt,
-                "stream": False
+                "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                    "num_predict": 512
+                }
             },
             timeout=(2.0, 60.0)
         )
         if ollama_resp.status_code == 200:
             answer = ollama_resp.json().get("response", "").strip()
         else:
-            answer = synthesize_fallback_answer(query, docs)
+            answer = f"Ollama returned status code {ollama_resp.status_code}. Make sure model '{model_name}' is pulled."
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-        # Graceful, professional clinical response directly from the encyclopedia
-        answer = synthesize_fallback_answer(query, docs)
+        # Graceful fallback explaining that Ollama is offline but showing retrieved RAG excerpts
+        if rag_active:
+            answer = (
+                f"**[RAG Retrieval Succeeded - Ollama is Offline]**\n\n"
+                f"### Retrieved Medical Excerpts ({len(sources)} Verified Citations):\n\n" +
+                "\n\n".join([f"- **Page {s.page or 'N/A'}** ({s.source}):\n  {s.content}" for s in sources]) +
+                f"\n\n---\n*Ollama model `{model_name}` was not connected at query time. Once started, Llama 3 will directly synthesize full clinical explanations.*"
+            )
+        else:
+            answer = (
+                "Ollama is currently unreachable at http://127.0.0.1:11434 and the vector index has not been built yet. "
+                "Please run `python cmfllm.py` to index the medical encyclopedia, and start Ollama via `ollama run llama3`."
+            )
 
     return ChatResponse(
         query=query,
